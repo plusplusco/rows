@@ -1064,24 +1064,72 @@ def generate_schema(table, export_fields, output_format, max_choices=100):
         }
         table_name = "".join(word.capitalize() for word in table.name.split("_"))
 
-        lines = ["from django.db import models"]
-        if rows.fields.JSONField in [
-            table.fields[field_name] for field_name in export_fields
-        ]:
-            lines.append("from django.contrib.postgres.fields import JSONField")
-        lines.append("")
-
-        lines.append("class {}(models.Model):".format(table_name))
-        for field_name, field_type in table.fields.items():
+        lines = [
+            "from django.db import models",
+            "",
+            "",
+            "class {}(models.Model):".format(table_name),
+        ]
+        model_choices = []
+        for field_name, metadata in field_metadata.items():
             if field_name not in export_fields:
                 continue
+            django_type_name = django_fields[metadata["type"]]
+            comment = {}
+            options = {
+                "null": metadata["null"],
+                "blank": metadata["null"],
+            }
+            for key in ("max_length", "decimal_places", "max_digits"):
+                if key in metadata:
+                    options[key] = metadata[key]
+            for key in ("max", "min"):
+                if key in metadata:
+                    comment["{} value".format(key)] = metadata[key]
+            if django_type_name == "TextField":
+                if metadata["subtype"] == "VARCHAR":
+                    django_type_name = "CharField"
+                field_choices = metadata.get("choices")
+                if field_choices is not None:
+                    if field_name not in reuse_choices:
+                        choices_name = "{}_CHOICES".format(field_name.upper())
+                        options["choices"] = choices_name
+                        model_choices.append(
+                            "    {} = (\n      {},\n    )".format(
+                                choices_name,
+                                ",\n      ".join(
+                                    "({}, {})".format(index, repr(value))
+                                    for index, value in enumerate(sorted(field_choices))
+                                )
+                            )
+                        )
+                    else:
+                        original_choice = reuse_choices[field_name]
+                        choices_name = "{}_CHOICES".format(original_choice.upper())
+                        options["choices"] = choices_name
+                    django_type_name = "SmallIntegerField"
+                    del options["max_length"]
+            options_str = ", ".join("{}={}".format(key, value) for key, value in options.items())
+            comment_str = "  # " + ", ".join("{}={}".format(key, value) for key, value in comment.items())
+            if django_type_name == "IntegerField":
+                subtypes = {
+                    "SMALLINT": "SmallIntegerField",
+                    "INTEGER": "IntegerField",
+                    "BIGINT": "BigIntegerField",
+                }
+                django_type_name = subtypes[metadata["subtype"]]
+                if metadata["min"] > 0:
+                    django_type_name = "Positive" + django_type_name
+            django_type = "models.{}({})".format(django_type_name, options_str)
+            lines.append("    {} = {}{}".format(field_name, django_type, comment_str if comment else ""))
 
-            if field_type is not rows.fields.JSONField:
-                django_type = "models.{}()".format(django_fields[field_type])
-            else:
-                django_type = "JSONField()"
-            lines.append("    {} = {}".format(field_name, django_type))
-
+        if model_choices:  # Add choice definitions before any field definitions
+            for index, line in enumerate(lines):
+                if line.startswith("class "):
+                    break
+            lines.insert(index + 1, "")
+            for choice_def in reversed(model_choices):
+                lines.insert(index + 1, choice_def)
         result = "\n".join(lines) + "\n"
         return result
 
