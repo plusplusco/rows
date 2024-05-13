@@ -20,7 +20,7 @@ from __future__ import unicode_literals
 import csv
 import io
 import os
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -890,7 +890,7 @@ def uncompressed_size(filename):
         raise ValueError('Unrecognized file type for "{}".'.format(filename))
 
 
-def generate_schema(table, export_fields, output_format):
+def generate_schema(table, export_fields, output_format, max_choices=100):
     """Generate table schema for a specific output format and write
 
     Current supported output formats: 'txt', 'sql' and 'django'.
@@ -898,20 +898,87 @@ def generate_schema(table, export_fields, output_format):
     name is taken from file name).
     """
 
+    # Detect field features
+    # TODO: move this code to detect algorithm and for each plugin (if possible), so we have this metadata available on
+    # all tables
+    # TODO: use rows.fields.NULL (or move NULL to rows.constants and use it)?
+    null_values = (None, "", "-", "N/A", "NA", "null", "NULL", "none", "NONE", "None")
+    field_metadata = {}
+    for field_name, field_type in table.fields.items():
+        field_metadata[field_name] = {"type": field_type}
+        values = table[field_name]
+        field_metadata[field_name]["null"] = any(value in null_values for value in values)
+        if field_type is rows.fields.TextField:
+            field_metadata[field_name]["max_length"] = max(len(value) for value in values if value is not None)
+            if any("\n" in value or len(value) > 65_533 for value in values):  # MySQL VARCHAR stores up to 65,533
+                field_metadata[field_name]["subtype"] = "TEXT"
+            else:
+                field_metadata[field_name]["subtype"] = "VARCHAR"
+            field_choices = set()
+            for value in values:
+                field_choices.add(value)
+                if len(field_choices) > max_choices:
+                    field_choices = None
+                    break
+            if field_choices is not None:
+                field_metadata[field_name]["choices"] = field_choices
+
+        elif field_type in (rows.fields.IntegerField, rows.fields.FloatField, rows.fields.DecimalField):
+            min_value = field_metadata[field_name]["min"] = min(value for value in values if value is not None)
+            max_value = field_metadata[field_name]["max"] = max(value for value in values if value is not None)
+            if field_type is rows.fields.IntegerField:
+                if -32_768 <= min_value and 32_767 >= max_value:  # 2 bytes
+                    field_metadata[field_name]["subtype"] = "SMALLINT"
+                elif -2_147_483_648 <= min_value and 2_147_483_647 >= max_value:  # 4 bytes
+                    field_metadata[field_name]["subtype"] = "INTEGER"
+                elif -9_223_372_036_854_775_808 <= min_value and 9_223_372_036_854_775_807 >= max_value:  # 8 bytes
+                    field_metadata[field_name]["subtype"] = "BIGINT"
+            if field_type is rows.fields.DecimalField:
+                max_left = max_right = 0
+                for value in values:
+                    value_str = str(value).strip("-")
+                    if "." in value_str:
+                        left, right = value_str.split(".")
+                    else:
+                        left, right = value_str, ""
+                    max_left = max(max_left, len(left))
+                    max_right = max(max_right, len(right))
+                field_metadata[field_name]["decimal_places"] = max_right
+                field_metadata[field_name]["max_digits"] = max_left + max_right
+
+    # Check if any of the fields have the same choices
+    same_choices = defaultdict(list)
+    added_as_repeated = set()
+    for index_1, (field_name_1, metadata_1) in enumerate(field_metadata.items()):
+        if "choices" not in metadata_1:
+            continue
+        for index_2, (field_name_2, metadata_2) in enumerate(field_metadata.items()):
+            if "choices" not in metadata_2 or index_1 >= index_2:
+                continue
+            if metadata_1["choices"] == metadata_2["choices"] and field_name_2 not in added_as_repeated:
+                same_choices[field_name_1].append(field_name_2)
+                added_as_repeated.add(field_name_2)
+    reuse_choices = {}
+    if same_choices:
+        for original_choice, repeated_choices in same_choices.items():
+            for repeated_choice in repeated_choices:
+                reuse_choices[repeated_choice] = original_choice
+
     if output_format in ("csv", "txt"):
         from rows import plugins
 
-        data = [
-            {
-                "field_name": fieldname,
-                "field_type": fieldtype.__name__.replace("Field", "").lower(),
-            }
-            for fieldname, fieldtype in table.fields.items()
-            if fieldname in export_fields
-        ]
-        table = plugins.dicts.import_from_dicts(
-            data, import_fields=["field_name", "field_type"]
-        )
+        data = []
+        for field_name, metadata in field_metadata.items():
+            if field_name not in export_fields:
+                continue
+            data.append(
+                {
+                    "field_name": field_name,
+                    "field_type": metadata["type"].__name__.replace("Field", "").lower(),
+                    **{key: value for key, value in metadata.items() if key != "type"},
+                }
+            )
+        table = plugins.dicts.import_from_dicts(data)
         if output_format == "txt":
             return plugins.txt.export_to_txt(table)
         elif output_format == "csv":
