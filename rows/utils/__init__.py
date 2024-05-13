@@ -928,7 +928,7 @@ def generate_schema(table, export_fields, output_format):
             rows.fields.FloatField: "FLOAT",
             rows.fields.PercentField: "FLOAT",
             rows.fields.DateField: "DATE",
-            rows.fields.DatetimeField: "DATETIME",
+            rows.fields.DatetimeField: "TIMESTAMP",
             rows.fields.TextField: "TEXT",
             rows.fields.DecimalField: "DECIMAL",
             rows.fields.EmailField: "TEXT",
