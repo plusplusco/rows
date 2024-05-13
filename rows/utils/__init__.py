@@ -1001,15 +1001,41 @@ def generate_schema(table, export_fields, output_format, max_choices=100):
             rows.fields.EmailField: "TEXT",
             rows.fields.JSONField: "TEXT",
         }
-        fields = [
-            "    {} {}".format(field_name, sql_fields[field_type])
-            for field_name, field_type in table.fields.items()
-            if field_name in export_fields
-        ]
+        choices_sql = []
+        fields = []
+        for field_name, metadata in field_metadata.items():
+            if field_name not in export_fields:
+                continue
+            sql_type = sql_fields[metadata["type"]]
+            if sql_type == "DECIMAL":
+                sql_type += "({}, {})".format(metadata["max_digits"], metadata["decimal_places"])
+            elif sql_type == "INTEGER":
+                sql_type = metadata["subtype"]
+            elif sql_type == "TEXT":
+                if metadata["subtype"] == "VARCHAR":
+                    sql_type = f"VARCHAR({metadata['max_length']})"
+                field_choices = metadata.get("choices")
+                if field_choices is not None:
+                    if field_name not in reuse_choices:
+                        enum_name = "enum_{}".format(field_name)
+                        choices_sql.append(
+                            """CREATE TYPE "{}" AS ENUM ({}\n);""".format(
+                                enum_name, ", ".join("\n  " + repr(value) for value in field_choices)
+                            )
+                        )
+                        sql_type = enum_name
+                    else:
+                        original_choices = reuse_choices[field_name]
+                        enum_name = "enum_{}".format(original_choices)
+                        sql_type = enum_name
+            # TODO: detect/add 'WITH TIME ZONE' when sql_type == "TIMESTAMP"
+            # TODO: should add comments, like max_length when sql_type == "TEXT"?
+            not_null = " NOT NULL" if not metadata["null"] else ""
+            fields.append('    "{}" {}{}'.format(field_name, sql_type, not_null))
         sql = (
             dedent(
                 """
-                CREATE TABLE IF NOT EXISTS {name} (
+                CREATE TABLE IF NOT EXISTS "{name}" (
                 {fields}
                 );
                 """
@@ -1018,6 +1044,8 @@ def generate_schema(table, export_fields, output_format, max_choices=100):
             .format(name=table.name, fields=",\n".join(fields))
             + "\n"
         )
+        if choices_sql:
+            sql = "\n".join(choices_sql) + "\n\n" + sql
         return sql
 
     elif output_format == "django":
