@@ -19,6 +19,7 @@ from __future__ import unicode_literals
 
 import csv
 import io
+import json
 import os
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
@@ -971,6 +972,8 @@ def generate_schema(table, export_fields, output_format, max_choices=100):
         for field_name, metadata in field_metadata.items():
             if field_name not in export_fields:
                 continue
+            if "choices" in metadata:
+                metadata["choices"] = json.dumps(sorted(metadata["choices"]))
             data.append(
                 {
                     "field_name": field_name,
