@@ -698,7 +698,7 @@ def query(
 @click.option("--quiet", "-q", is_flag=True)
 @click.argument("source", required=True)
 @click.argument("output", required=False, default="-")
-def schema(
+def command_schema(
     input_encoding,
     input_locale,
     verify_ssl,
@@ -730,13 +730,13 @@ def schema(
 
     if detect_all_types:
         field_types_names = [
-            field_name for field_name in rows.fields.__all__ if field_name != "Field"
+            field_name for field_name in rows.fields.__all__ if field_name not in ("Field", "FloatField")
         ]
     else:
         field_types_names = [
             FieldClass.__name__
             for FieldClass in rows.fields.DEFAULT_TYPES
-            if FieldClass != rows.fields.Field
+            if FieldClass not in (rows.fields.Field, rows.fields.FloatField)
         ]
     field_types = [getattr(rows.fields, field_name) for field_name in field_types_names]
 

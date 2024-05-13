@@ -924,13 +924,13 @@ def generate_schema(table, export_fields, output_format):
         sql_fields = {
             rows.fields.BinaryField: "BLOB",
             rows.fields.BoolField: "BOOL",
-            rows.fields.IntegerField: "INT",
+            rows.fields.IntegerField: "INTEGER",
             rows.fields.FloatField: "FLOAT",
             rows.fields.PercentField: "FLOAT",
             rows.fields.DateField: "DATE",
             rows.fields.DatetimeField: "DATETIME",
             rows.fields.TextField: "TEXT",
-            rows.fields.DecimalField: "FLOAT",
+            rows.fields.DecimalField: "DECIMAL",
             rows.fields.EmailField: "TEXT",
             rows.fields.JSONField: "TEXT",
         }
