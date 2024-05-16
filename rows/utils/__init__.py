@@ -917,7 +917,8 @@ def generate_schema(table, export_fields, output_format, max_choices=100):
                 field_metadata[field_name]["subtype"] = "VARCHAR"
             field_choices = set()
             for value in values:
-                field_choices.add(value)
+                if value != "":
+                    field_choices.add(value)
                 if len(field_choices) > max_choices:
                     field_choices = None
                     break
