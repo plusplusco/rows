@@ -891,7 +891,7 @@ def uncompressed_size(filename):
         raise ValueError('Unrecognized file type for "{}".'.format(filename))
 
 
-def generate_schema(table, export_fields, output_format, max_choices=100):
+def generate_schema(table, export_fields, output_format, max_choices=100, exclude_choices=None):
     """Generate table schema for a specific output format and write
 
     Current supported output formats: 'txt', 'sql' and 'django'.
@@ -904,6 +904,7 @@ def generate_schema(table, export_fields, output_format, max_choices=100):
     # all tables
     # TODO: use rows.fields.NULL (or move NULL to rows.constants and use it)?
     null_values = (None, "", "-", "N/A", "NA", "null", "NULL", "none", "NONE", "None")
+    exclude_choices = set() if exclude_choices is None else set(exclude_choices)
     field_metadata = {}
     for field_name, field_type in table.fields.items():
         field_metadata[field_name] = {"type": field_type}
@@ -915,15 +916,16 @@ def generate_schema(table, export_fields, output_format, max_choices=100):
                 field_metadata[field_name]["subtype"] = "TEXT"
             else:
                 field_metadata[field_name]["subtype"] = "VARCHAR"
-            field_choices = set()
-            for value in values:
-                if value != "":
-                    field_choices.add(value)
-                if len(field_choices) > max_choices:
-                    field_choices = None
-                    break
-            if field_choices is not None:
-                field_metadata[field_name]["choices"] = field_choices
+            if field_name not in exclude_choices:
+                field_choices = set()
+                for value in values:
+                    if value != "":
+                        field_choices.add(value)
+                    if len(field_choices) > max_choices:
+                        field_choices = None
+                        break
+                if field_choices is not None:
+                    field_metadata[field_name]["choices"] = field_choices
 
         elif field_type in (rows.fields.IntegerField, rows.fields.FloatField, rows.fields.DecimalField):
             min_value = field_metadata[field_name]["min"] = min(value for value in values if value is not None)
@@ -1134,6 +1136,28 @@ def generate_schema(table, export_fields, output_format, max_choices=100):
             lines.insert(index + 1, "")
             for choice_def in reversed(model_choices):
                 lines.insert(index + 1, choice_def)
+
+        # TODO: Add a method to create ORM object from a dict, mapping the choices
+        # TODO: must convert all types (int, float etc.)
+        #lines.append("")
+        #lines.append(
+        #    indent(
+        #        dedent(
+        #            f"""
+        #            @classmethod
+        #            def from_dict(cls, data):
+        #                "Converts a dictionary into `{table_name}`, mapping choices"
+        #                new = {{key: value for key, value in data.items()}}
+        #                new[]
+        #                for field_name in ({field_names_str}):
+        #                    cls._CHOICES
+        #                return cls(**new)
+        #            """
+        #        ),
+        #        4
+        #    )
+        #)
+        # TODO: implement to_dict also
         result = "\n".join(lines) + "\n"
         return result
 

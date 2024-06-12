@@ -666,6 +666,11 @@ def query(
             export_to_uri(result, output, encoding=output_encoding)
 
 
+def parse_comma_separated(ctx, param, value):
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",")]
+
 @cli.command(name="schema", help="Identifies table schema")
 @click.option("--input-encoding", default=None)
 @click.option("--input-locale")
@@ -695,6 +700,17 @@ def query(
     default=5000,
     help="Number of rows to determine the field types (0 = all)",
 )
+@click.option(
+    "--max-choices",
+    type=int,
+    default=100,
+    help="Maximum number of different values to treat a field as choices/enums. Use 0 to disable the creation of choices/enums",
+)
+@click.option(
+    "--exclude-choices",
+    callback=parse_comma_separated,
+    help="Comma-separated list of field names to not consider as choices/enums. Example: field1,field2,field3"
+)
 @click.option("--quiet", "-q", is_flag=True)
 @click.argument("source", required=True)
 @click.argument("output", required=False, default="-")
@@ -708,6 +724,8 @@ def command_schema(
     fields,
     fields_exclude,
     samples,
+    max_choices,
+    exclude_choices,
     quiet,
     source,
     output,
@@ -771,7 +789,9 @@ def command_schema(
         output_fobj = sys.stdout.buffer
     else:
         output_fobj = open_compressed(output, mode="wb")
-    content = generate_schema(table, export_fields, output_format)
+    # TODO: check if all field names in `exclude_choices` actually exists on source dataset
+    content = generate_schema(table, export_fields, output_format, max_choices=max_choices,
+                              exclude_choices=exclude_choices)
     output_fobj.write(content.encode("utf-8"))
 
 @cli.command(name="csv-inspect", help="Identifies encoding, dialect and schema")
