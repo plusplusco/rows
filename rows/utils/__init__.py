@@ -911,7 +911,7 @@ def generate_schema(table, export_fields, output_format, max_choices=100, exclud
         values = table[field_name]
         field_metadata[field_name]["null"] = any(value in null_values for value in values)
         if field_type is rows.fields.TextField:
-            field_metadata[field_name]["max_length"] = max(len(value) for value in values if value is not None)
+            field_metadata[field_name]["max_length"] = max(1, max(len(value) for value in values if value is not None))
             if any("\n" in value or len(value) > 65_533 for value in values):  # MySQL VARCHAR stores up to 65,533
                 field_metadata[field_name]["subtype"] = "TEXT"
             else:
